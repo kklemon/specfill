@@ -17,6 +17,15 @@ in, faithfully preserving your style and structure. If an answer contradicts
 the original prompt, the latest answer wins. Decisions you left unresolved stay
 exactly as ambiguous as you wrote them; nothing is invented.
 
+## How is this different from plan mode?
+
+Plan modes, as implemented in common coding agent CLIs, are less thorough and
+don't explicitly look for gaps in your specification. They produce a plan for
+the task at hand, but that plan can hardly be used to define the original
+project specification, which can serve as a valuable documentation artifact on
+its own. specfill borrows the question UX from plan mode, but its output is the
+specification itself: complete, in your own words, and reusable.
+
 ## Installation
 
 Requires Python ≥ 3.12 on macOS or Linux. Install as a
