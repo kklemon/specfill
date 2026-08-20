@@ -105,6 +105,10 @@ def build_model(settings: Settings, api_key: str) -> Model:
         return OpenAIResponsesModel(
             settings.model, provider=OpenAIProvider(api_key=api_key, base_url=base_url)
         )
+    if settings.provider == "openai-subscription":
+        from .codex import build_codex_model
+
+        return build_codex_model(settings)
     if settings.provider == "openai-compatible":
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider

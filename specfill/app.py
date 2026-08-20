@@ -31,6 +31,7 @@ from .agents import InterviewSession, build_model, stream_rewrite
 from .config import (
     PROVIDERS,
     Settings,
+    codex_auth_path,
     config_path,
     default_settings,
     get_api_key,
@@ -139,8 +140,13 @@ class WizardScreen(Screen):
                 placeholder="model identifier",
                 id="model",
             )
-            yield Label("API key")
-            yield Input(password=True, placeholder=self._key_placeholder(), id="api_key")
+            yield Label(self._key_label(), id="api_key_label")
+            yield Input(
+                password=True,
+                placeholder=self._key_placeholder(),
+                id="api_key",
+                disabled=PROVIDERS[self._provider].uses_codex_oauth,
+            )
             yield Label("Base URL")
             yield Input(
                 value=current.base_url if current else "",
@@ -160,10 +166,16 @@ class WizardScreen(Screen):
         return default_settings(self._provider)
 
     def _key_placeholder(self) -> str:
+        if PROVIDERS[self._provider].uses_codex_oauth:
+            return "Managed by Codex (`codex login`)"
         if get_api_key(self._candidate_settings()):
             return "stored — leave blank to keep"
         env_var = PROVIDERS[self._provider].env_var
+        assert env_var is not None
         return f"API key (or set ${env_var})"
+
+    def _key_label(self) -> str:
+        return "Codex OAuth" if PROVIDERS[self._provider].uses_codex_oauth else "API key"
 
     def _base_url_placeholder(self) -> str:
         if PROVIDERS[self._provider].needs_base_url:
@@ -178,7 +190,10 @@ class WizardScreen(Screen):
         value = model_input.value.strip()
         if not value or value == PROVIDERS[previous].default_model:
             model_input.value = PROVIDERS[self._provider].default_model
-        self.query_one("#api_key", Input).placeholder = self._key_placeholder()
+        key_input = self.query_one("#api_key", Input)
+        key_input.placeholder = self._key_placeholder()
+        key_input.disabled = PROVIDERS[self._provider].uses_codex_oauth
+        self.query_one("#api_key_label", Label).update(self._key_label())
         self.query_one("#base_url", Input).placeholder = self._base_url_placeholder()
 
     @on(Button.Pressed, "#save")
@@ -205,7 +220,7 @@ class WizardScreen(Screen):
         settings = self._candidate_settings().model_copy(
             update={"provider": self._provider, "model": model, "base_url": base_url}
         )
-        if key:
+        if key and not preset.uses_codex_oauth:
             settings = store_api_key(settings, key)
             if settings.api_key_storage == "config":
                 self.notify(
@@ -213,9 +228,12 @@ class WizardScreen(Screen):
                     severity="warning",
                 )
         elif not get_api_key(settings):
-            self.notify(
-                f"Enter an API key (or set ${preset.env_var}).", severity="warning"
+            message = (
+                "Codex OAuth credentials not found. Run `codex login` first."
+                if preset.uses_codex_oauth
+                else f"Enter an API key (or set ${preset.env_var})."
             )
+            self.notify(message, severity="warning")
             return
         save_settings(settings)
 
@@ -639,7 +657,10 @@ def _config_show(settings: Settings) -> int:
     print(f"model:        {settings.model}")
     print(f"base-url:     {settings.base_url or '(none)'}")
     print(f"web-search:   {str(settings.web_search).lower()}")
-    print(f"api key:      {stored} (storage: {settings.api_key_storage})")
+    if settings.preset.uses_codex_oauth:
+        print(f"codex oauth:  {stored} ({codex_auth_path()})")
+    else:
+        print(f"api key:      {stored} (storage: {settings.api_key_storage})")
     return 0
 
 
@@ -654,6 +675,8 @@ def _config_set(settings: Settings, key: str, value: str) -> int:
         update = {"provider": value}
         if not settings.model or settings.model == settings.preset.default_model:
             update["model"] = PROVIDERS[value].default_model
+        if value != settings.provider:
+            update.update(api_key_storage="keyring", api_key="")
         settings = settings.model_copy(update=update)
     elif key == "model":
         settings = settings.model_copy(update={"model": value})
@@ -672,6 +695,12 @@ def _config_set(settings: Settings, key: str, value: str) -> int:
 def _config_set_key(settings: Settings) -> int:
     import getpass
 
+    if settings.preset.uses_codex_oauth:
+        print(
+            "specfill: OpenAI subscription credentials are managed by Codex; run `codex login`",
+            file=sys.stderr,
+        )
+        return 1
     key = getpass.getpass(f"API key for {settings.preset.label}: ").strip()
     if not key:
         print("specfill: no key entered", file=sys.stderr)

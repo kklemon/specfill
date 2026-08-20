@@ -5,6 +5,7 @@ import pytest
 def isolated_config(tmp_path, monkeypatch):
     """Keep tests away from the user's real config, env vars, and keyring."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
     for var in (
         "SPECFILL_PROVIDER",
         "SPECFILL_MODEL",

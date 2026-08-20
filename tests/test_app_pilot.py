@@ -1,6 +1,7 @@
 """Headless end-to-end drives of the TUI with scripted models — no network."""
 
 import asyncio
+import json
 
 from pydantic_ai import models
 from pydantic_ai.messages import ModelResponse, ToolCallPart
@@ -15,7 +16,12 @@ from specfill.app import (
     SpecfillApp,
     WizardScreen,
 )
-from specfill.config import default_settings, get_api_key, load_settings
+from specfill.config import (
+    codex_auth_path,
+    default_settings,
+    get_api_key,
+    load_settings,
+)
 from specfill.models import Question, QuestionBatch, QuestionOption
 
 models.ALLOW_MODEL_REQUESTS = False
@@ -197,3 +203,31 @@ async def test_first_launch_wizard_saves_and_continues():
     assert saved is not None
     assert saved.model == "gpt-5.6-sol"
     assert get_api_key(saved) == "sk-wizard-test"
+
+
+async def test_first_launch_wizard_accepts_codex_oauth_without_api_key():
+    path = codex_auth_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {"tokens": {"access_token": "oauth-test", "account_id": "account-test"}}
+        )
+    )
+
+    app = SpecfillApp(settings=None, model=None)
+    async with app.run_test(size=(100, 45)) as pilot:
+        await pilot.pause()
+        wizard = app.screen
+        assert isinstance(wizard, WizardScreen)
+
+        wizard.query("#provider RadioButton")[1].value = True
+        await pilot.pause()
+        assert wizard.query_one("#api_key").disabled is True
+        await pilot.press("ctrl+s")
+        await _wait_for(pilot, lambda: isinstance(app.screen, PasteScreen))
+        assert app.settings is not None
+        assert app.settings.provider == "openai-subscription"
+
+    saved = load_settings()
+    assert saved is not None
+    assert saved.provider == "openai-subscription"
