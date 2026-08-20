@@ -8,6 +8,15 @@ PasteScreen #seed {
     height: 1fr;
 }
 
+PasteScreen #custom_label {
+    padding: 1 2 0 2;
+    color: $text-muted;
+}
+
+PasteScreen #custom_instructions {
+    margin: 0 2;
+}
+
 #actions {
     height: auto;
     padding: 1 2;

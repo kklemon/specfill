@@ -116,6 +116,26 @@ async def test_search_failure_warns_and_falls_back():
     assert calls == 2
 
 
+async def test_custom_instructions_reach_the_model():
+    seen = {}
+
+    def model_fn(messages, info):
+        seen["instructions"] = messages[0].instructions
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="finish_interview", args={"summary": "ok"})]
+        )
+
+    session = InterviewSession(
+        "x",
+        FunctionModel(model_fn),
+        web_search=False,
+        custom_instructions="focus on the scraping part",
+    )
+    await session.start()
+    assert "focus on the scraping part" in seen["instructions"]
+    assert "expert requirements analyst" in seen["instructions"]  # base rules kept
+
+
 def test_format_round_feedback_selected_and_skipped():
     q1, q2 = make_question(), make_question("Deploy")
     text = format_round_feedback(

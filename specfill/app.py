@@ -248,10 +248,15 @@ class PasteScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static(
-            "Paste your project seed prompt below, then press Ctrl+S (or the button) to analyze it.",
+            "Paste your project specification prompt below, then press Ctrl+S (or the button) to analyze it.",
             id="instructions",
         )
         yield TextArea(self._prefill, id="seed")
+        yield Label("Custom instructions (optional)", id="custom_label")
+        yield Input(
+            placeholder='e.g. "also correct spelling mistakes" or "challenge me on ui/ux decisions"',
+            id="custom_instructions",
+        )
         with Horizontal(id="actions"):
             yield Button("Analyze", variant="primary", id="analyze")
         yield Footer()
@@ -266,9 +271,10 @@ class PasteScreen(Screen):
     def action_analyze(self) -> None:
         text = self.query_one("#seed", TextArea).text.strip()
         if not text:
-            self.notify("Paste a seed prompt first.", severity="warning")
+            self.notify("Paste a specification prompt first.", severity="warning")
             return
-        self.app.push_screen(InterviewScreen(text))
+        custom = self.query_one("#custom_instructions", Input).value.strip()
+        self.app.push_screen(InterviewScreen(text, custom_instructions=custom))
 
     def action_settings(self) -> None:
         self.app.push_screen(WizardScreen())
@@ -282,9 +288,10 @@ class InterviewScreen(Screen):
         Binding("ctrl+r", "retry", "Retry", show=False),
     ]
 
-    def __init__(self, seed: str) -> None:
+    def __init__(self, seed: str, custom_instructions: str = "") -> None:
         super().__init__()
         self.seed = seed
+        self.custom_instructions = custom_instructions
         self.session: InterviewSession | None = None
         self.pending: list[Question] = []
         self.index = 0
@@ -312,6 +319,7 @@ class InterviewScreen(Screen):
             self.seed,
             app.model_instance,
             web_search=web_search,
+            custom_instructions=self.custom_instructions,
             # The activity handler opts into response streaming; only wire it
             # when there is research progress to show.
             on_activity=self._on_activity if web_search else None,
@@ -388,7 +396,9 @@ class InterviewScreen(Screen):
 
     def _to_result(self, answers: list[Answer]) -> None:
         self.workers.cancel_group(self, "llm")
-        self.app.push_screen(ResultScreen(self.seed, answers))
+        self.app.push_screen(
+            ResultScreen(self.seed, answers, custom_instructions=self.custom_instructions)
+        )
 
     # --- ui state ----------------------------------------------------------
 
@@ -461,10 +471,11 @@ class ResultScreen(Screen):
         Binding("q", "quit_app", "Quit"),
     ]
 
-    def __init__(self, seed: str, answers: list[Answer]) -> None:
+    def __init__(self, seed: str, answers: list[Answer], custom_instructions: str = "") -> None:
         super().__init__()
         self.seed = seed
         self.answers = answers
+        self.custom_instructions = custom_instructions
         self.final_text = ""
 
     def compose(self) -> ComposeResult:
@@ -501,7 +512,9 @@ class ResultScreen(Screen):
         status.update("Generating refined prompt…")
         last = 0.0
         try:
-            async for text in stream_rewrite(app.model_instance, self.seed, self.answers):
+            async for text in stream_rewrite(
+                app.model_instance, self.seed, self.answers, self.custom_instructions
+            ):
                 self.final_text = text
                 now = monotonic()
                 if now - last > 0.2:

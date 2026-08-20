@@ -84,6 +84,17 @@ Absolute rules:
 """
 
 
+def _with_custom_instructions(base: str, custom: str) -> str:
+    if not custom.strip():
+        return base
+    return (
+        base
+        + "\n\nThe user added these custom instructions. Follow them where applicable; "
+        "when they conflict with the rules above, the custom instructions win:\n"
+        f"<custom_instructions>\n{custom.strip()}\n</custom_instructions>"
+    )
+
+
 def build_model(settings: Settings, api_key: str) -> Model:
     """Construct the Pydantic AI model instance for the configured provider."""
     base_url = settings.base_url.strip() or None
@@ -134,7 +145,7 @@ def _check_questions(output: QuestionBatch | InterviewComplete):
     return output
 
 
-def make_interviewer(model: Model, *, web_search: bool) -> Agent:
+def make_interviewer(model: Model, *, web_search: bool, custom_instructions: str = "") -> Agent:
     capabilities = None
     if web_search:
         # optional=True: silently dropped on models without native web search.
@@ -153,7 +164,7 @@ def make_interviewer(model: Model, *, web_search: bool) -> Agent:
                 description="Declare the interview complete; no further questions needed",
             ),
         ],
-        instructions=INTERVIEWER_INSTRUCTIONS,
+        instructions=_with_custom_instructions(INTERVIEWER_INSTRUCTIONS, custom_instructions),
         retries=2,
         capabilities=capabilities,
     )
@@ -161,8 +172,12 @@ def make_interviewer(model: Model, *, web_search: bool) -> Agent:
     return agent
 
 
-def make_rewriter(model: Model) -> Agent:
-    return Agent(model, output_type=str, instructions=REWRITER_INSTRUCTIONS)
+def make_rewriter(model: Model, custom_instructions: str = "") -> Agent:
+    return Agent(
+        model,
+        output_type=str,
+        instructions=_with_custom_instructions(REWRITER_INSTRUCTIONS, custom_instructions),
+    )
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -197,6 +212,7 @@ class InterviewSession:
         model: Model,
         *,
         web_search: bool = True,
+        custom_instructions: str = "",
         on_activity: Callable[[str], None] | None = None,
         on_warning: Callable[[str], None] | None = None,
     ):
@@ -207,8 +223,14 @@ class InterviewSession:
         self.on_activity = on_activity
         self.on_warning = on_warning
         self._messages = None
-        self._search_agent = make_interviewer(model, web_search=True) if web_search else None
-        self._plain_agent = make_interviewer(model, web_search=False)
+        self._search_agent = (
+            make_interviewer(model, web_search=True, custom_instructions=custom_instructions)
+            if web_search
+            else None
+        )
+        self._plain_agent = make_interviewer(
+            model, web_search=False, custom_instructions=custom_instructions
+        )
 
     async def _handle_events(self, ctx, stream) -> None:
         async for event in stream:
@@ -298,10 +320,10 @@ def build_rewriter_prompt(seed_prompt: str, answers: list[Answer]) -> str:
 
 
 async def stream_rewrite(
-    model: Model, seed_prompt: str, answers: list[Answer]
+    model: Model, seed_prompt: str, answers: list[Answer], custom_instructions: str = ""
 ) -> AsyncIterator[str]:
     """Yield the accumulated rewritten prompt as it streams in."""
-    rewriter = make_rewriter(model)
+    rewriter = make_rewriter(model, custom_instructions=custom_instructions)
     async with rewriter.run_stream(build_rewriter_prompt(seed_prompt, answers)) as result:
         async for text in result.stream_text():
             yield text

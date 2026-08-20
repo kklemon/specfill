@@ -68,9 +68,11 @@ async def test_full_flow(monkeypatch):
         )
 
     collected = []
+    stream_kwargs = {}
 
-    async def fake_stream(model, seed, answers):
+    async def fake_stream(model, seed, answers, custom_instructions=""):
         collected.extend(answers)
+        stream_kwargs["custom_instructions"] = custom_instructions
         for chunk in ["# Refined", FINAL]:
             yield chunk
             await asyncio.sleep(0)
@@ -84,6 +86,7 @@ async def test_full_flow(monkeypatch):
     )
     async with app.run_test(size=(100, 40)) as pilot:
         assert isinstance(app.screen, PasteScreen)
+        app.screen.query_one("#custom_instructions").value = "also correct spelling mistakes"
         await pilot.press("ctrl+s")
         await pilot.pause()
         assert isinstance(app.screen, InterviewScreen)
@@ -113,6 +116,7 @@ async def test_full_flow(monkeypatch):
     assert [a.selected for a in collected] == [["OAuth"], ["macOS"]]
     assert collected[1].other_text == "maybe Windows later"
     assert not collected[0].skipped
+    assert stream_kwargs["custom_instructions"] == "also correct spelling mistakes"
 
 
 async def test_skip_and_finish_now(monkeypatch):
@@ -121,7 +125,7 @@ async def test_skip_and_finish_now(monkeypatch):
             parts=[ToolCallPart(tool_name="ask_questions", args=BATCH.model_dump())]
         )
 
-    async def fake_stream(model, seed, answers):
+    async def fake_stream(model, seed, answers, custom_instructions=""):
         yield FINAL
 
     monkeypatch.setattr(app_mod, "stream_rewrite", fake_stream)
@@ -153,7 +157,7 @@ async def test_regenerate_uses_same_evidence(monkeypatch):
 
     stream_calls = []
 
-    async def fake_stream(model, seed, answers):
+    async def fake_stream(model, seed, answers, custom_instructions=""):
         stream_calls.append(list(answers))
         yield FINAL
 
