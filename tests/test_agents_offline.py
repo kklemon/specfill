@@ -1,10 +1,13 @@
 """Offline tests for the agents layer — no network, scripted models only."""
 
+import json
+
 from pydantic_ai import models
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
-from specfill.agents import MAX_ROUNDS, InterviewSession
+from specfill.agents import MAX_ROUNDS, InterviewSession, build_model
+from specfill.config import codex_auth_path, default_settings
 from specfill.models import (
     Answer,
     InterviewComplete,
@@ -16,6 +19,29 @@ from specfill.models import (
 )
 
 models.ALLOW_MODEL_REQUESTS = False
+
+
+def test_build_subscription_model_uses_codex_endpoint_and_account_header():
+    path = codex_auth_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "tokens": {
+                    "access_token": "oauth-test",
+                    "account_id": "account-test",
+                }
+            }
+        )
+    )
+
+    model = build_model(default_settings("openai-subscription"), "oauth-test")
+    client = model.provider.client
+    assert str(client.base_url) == "https://chatgpt.com/backend-api/codex/"
+    assert client.api_key == "oauth-test"
+    assert client.default_headers["ChatGPT-Account-Id"] == "account-test"
+    assert client.default_headers["originator"] == "specfill"
+    assert model.settings == {"openai_store": False}
 
 
 def make_question(header: str = "Auth", kind: str = "single") -> Question:

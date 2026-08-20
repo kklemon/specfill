@@ -36,10 +36,11 @@ uv tool install specfill        # from a checkout: uv tool install .
 ```
 
 On first launch, a configuration wizard collects your provider preset
-(**OpenAI**, **OpenAI-compatible**, **Anthropic**, or **Google**), model
-identifier, API key, and an optional custom base URL. The API key is stored in
-the system keyring. If no keyring backend is available, it falls back to the
-config file (chmod 600).
+(**OpenAI API**, **OpenAI subscription**, **OpenAI-compatible**, **Anthropic**,
+or **Google**), model identifier, API key, and an optional custom base URL. The
+OpenAI subscription option reuses a Codex login from `~/.codex/auth.json`; run
+`codex login` first. Other API keys are stored in the system keyring. If no
+keyring backend is available, they fall back to the config file (chmod 600).
 
 ## Usage
 
@@ -75,6 +76,7 @@ paste screen), the CLI, or the file itself.
 specfill config show                    # current configuration
 specfill config path                    # config file location
 specfill config set provider anthropic  # provider | model | base-url | web-search
+specfill config set provider openai-subscription
 specfill config set model claude-opus-5
 specfill config set-key                 # store the API key (hidden prompt)
 ```
@@ -84,6 +86,12 @@ environment variables, for example `SPECFILL_MODEL` or
 `SPECFILL_WEB_SEARCH=false`. API keys resolve from the keyring first, then the
 config file or `$SPECFILL_API_KEY`, then the provider's conventional variable
 (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`).
+
+`openai-subscription` uses the OAuth credentials maintained by Codex and sends
+Responses requests to `https://chatgpt.com/backend-api/codex`. These requests
+count against the limits of the signed-in ChatGPT plan rather than API billing.
+This direct backend is not documented as a stable public API, so it may require
+maintenance when Codex authentication or request requirements change.
 
 LLM inference is provider-agnostic via [Pydantic AI](https://ai.pydantic.dev/)
 (default model: OpenAI GPT-5.6 Sol). The UI is built with

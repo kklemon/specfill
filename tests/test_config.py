@@ -1,14 +1,19 @@
 """Config layer tests: save/load round-trip, keyring fallback, key resolution."""
 
+import json
+
 import keyring
 import keyring.errors
+import pytest
 
 from specfill.config import (
     KEYRING_SERVICE,
     Settings,
+    codex_auth_path,
     config_path,
     default_settings,
     get_api_key,
+    get_codex_auth,
     load_settings,
     save_settings,
     store_api_key,
@@ -76,6 +81,53 @@ def test_get_api_key_env_fallback(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env")
     settings = default_settings("anthropic")
     assert get_api_key(settings) == "sk-env"
+
+
+def test_codex_oauth_credentials_are_read_from_codex_home():
+    path = codex_auth_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "tokens": {
+                    "access_token": "oauth-test",
+                    "account_id": "account-test",
+                    "refresh_token": "not-used",
+                }
+            }
+        )
+    )
+
+    auth = get_codex_auth()
+    assert auth is not None
+    assert auth.access_token == "oauth-test"
+    assert auth.account_id == "account-test"
+    assert get_api_key(default_settings("openai-subscription")) == "oauth-test"
+
+
+@pytest.mark.parametrize(
+    "contents",
+    ["not json", "{}", '{"tokens": {"access_token": "token-only"}}'],
+)
+def test_invalid_codex_oauth_credentials_are_ignored(contents):
+    path = codex_auth_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(contents)
+    assert get_codex_auth() is None
+    assert get_api_key(default_settings("openai-subscription")) == ""
+
+
+def test_codex_oauth_provider_rejects_stored_api_keys():
+    with pytest.raises(ValueError, match="managed by Codex"):
+        store_api_key(default_settings("openai-subscription"), "sk-nope")
+
+
+def test_codex_oauth_provider_never_writes_api_key_to_config():
+    settings = default_settings("openai-subscription").model_copy(
+        update={"api_key_storage": "config", "api_key": "stale-secret"}
+    )
+    save_settings(settings)
+    assert "stale-secret" not in config_path().read_text()
 
 
 def test_keys_are_per_provider(isolated_config):
