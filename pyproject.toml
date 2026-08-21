@@ -1,6 +1,6 @@
 [project]
 name = "specfill"
-version = "0.1.1"
+version = "0.1.2"
 description = "Interactive TUI that interviews you about underspecified points in a project seed prompt and produces a refined prompt"
 readme = "README.md"
 license = "MIT"
