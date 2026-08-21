@@ -2,7 +2,7 @@
 
 An interactive TUI that fills the gaps in your project specification prompts.
 
-![specfill demo showing prompt analysis, interview questions, and the refined prompt](docs/assets/specfill-demo.gif)
+<img src="docs/assets/specfill-demo.gif" alt="specfill demo showing prompt analysis, interview questions, and the refined prompt" width="720">
 
 You paste a long project specification prompt that you intend to hand to a
 coding agent, or load it from a file. An LLM agent researches the topic with
