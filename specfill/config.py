@@ -8,6 +8,7 @@ Codex OAuth credentials are read directly from $CODEX_HOME/auth.json.
 import json
 import os
 import stat
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -179,12 +180,18 @@ def default_settings(provider: ProviderName = "openai") -> Settings:
 
 
 def load_settings() -> Settings | None:
-    """Return saved settings, or None when unconfigured (first launch)."""
+    """Return saved settings, or None when unconfigured or unusable.
+
+    A hand-edited file can be invalid TOML, not just invalid values, so a
+    malformed file is treated like an absent one: the app falls back to the
+    first-launch wizard and `specfill config` still runs, instead of dying with
+    a traceback before the UI starts.
+    """
     if not config_path().is_file():
         return None
     try:
         return Settings()
-    except ValidationError:
+    except (ValidationError, tomllib.TOMLDecodeError, OSError):
         return None
 
 
@@ -194,7 +201,13 @@ def save_settings(settings: Settings) -> Path:
     data = settings.model_dump()
     if settings.preset.uses_codex_oauth or settings.api_key_storage != "config":
         data.pop("api_key")
-    path.write_text(tomli_w.dumps(data))
+    # Create the file already restricted: it can hold an API key when the
+    # keyring is unavailable, and write_text() would briefly create it with the
+    # process umask before the chmod below. os.open's mode applies only at
+    # creation, so the chmod still covers a pre-existing, looser file.
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(tomli_w.dumps(data))
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # keys may be stored here on keyring fallback
     return path
 

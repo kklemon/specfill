@@ -1,6 +1,9 @@
 """Config layer tests: save/load round-trip, keyring fallback, key resolution."""
 
 import json
+import os
+import stat
+from pathlib import Path
 
 import keyring
 import keyring.errors
@@ -46,6 +49,44 @@ def test_corrupt_config_returns_none():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("provider = 'not-a-provider'\n")
     assert load_settings() is None
+
+
+def test_malformed_toml_config_returns_none():
+    """A syntax error is not a ValidationError; it must not escape load_settings."""
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("provider = [unclosed\n")
+    assert load_settings() is None
+
+
+def test_unreadable_config_returns_none(monkeypatch):
+    path = save_settings(default_settings("openai"))
+    real_open = Path.open
+
+    def denied(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(13, "Permission denied")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", denied)
+    assert load_settings() is None
+
+
+def test_save_settings_creates_file_with_restrictive_mode(monkeypatch):
+    """The file must never exist with umask permissions, even briefly."""
+    modes = []
+    real_open = os.open
+
+    def observed_open(target, flags, mode=0o777):
+        descriptor = real_open(target, flags, mode)
+        modes.append(stat.S_IMODE(os.fstat(descriptor).st_mode))
+        return descriptor
+
+    monkeypatch.setattr(os, "open", observed_open)
+    path = save_settings(default_settings("openai").model_copy(update={"api_key": "sk-x"}))
+
+    assert modes == [0o600], modes
+    assert (path.stat().st_mode & 0o777) == 0o600
 
 
 def test_env_overrides_config_file(monkeypatch):
