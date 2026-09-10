@@ -145,12 +145,32 @@ async def test_round_cap_returns_complete_without_llm_call():
         raise AssertionError("the model must not be called once the round cap is hit")
 
     session = InterviewSession("x", FunctionModel(model_fn), web_search=False)
+    session.rounds_completed = MAX_ROUNDS
+    answers = [Answer(question=make_question(), skipped=True)]
+    outcome = await session.submit_answers(answers)
+    assert isinstance(outcome, InterviewComplete)
+    assert session.rounds_completed == MAX_ROUNDS + 1
+    assert session.transcript == answers
+
+
+async def test_round_cap_allows_the_last_round():
+    """Round MAX_ROUNDS must still be asked; only the round after it is refused."""
+    calls = 0
+
+    def model_fn(messages, info):
+        nonlocal calls
+        calls += 1
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="finish_interview", args={"summary": "ok"})]
+        )
+
+    session = InterviewSession("x", FunctionModel(model_fn), web_search=False)
     session.rounds_completed = MAX_ROUNDS - 1
     answers = [Answer(question=make_question(), skipped=True)]
     outcome = await session.submit_answers(answers)
     assert isinstance(outcome, InterviewComplete)
+    assert calls == 1, "the model must still be consulted for the final round"
     assert session.rounds_completed == MAX_ROUNDS
-    assert session.transcript == answers
 
 
 async def test_transcript_not_recorded_on_llm_failure():

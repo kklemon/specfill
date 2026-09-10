@@ -134,6 +134,113 @@ async def test_full_flow(monkeypatch):
     assert stream_kwargs["custom_instructions"] == "also correct spelling mistakes"
 
 
+SINGLE_QUESTION_BATCH = QuestionBatch(
+    questions=[
+        Question(
+            header="Auth",
+            text="Which auth method?",
+            kind="single",
+            options=[
+                QuestionOption(label="OAuth", description="via GitHub"),
+                QuestionOption(label="JWT"),
+            ],
+        )
+    ]
+)
+
+
+def _one_question_model():
+    """A scripted model whose follow-up request stays in flight.
+
+    That is what makes key auto-repeat realistic: the round takes seconds, so a
+    repeated key arrives while the answered card is still on screen.
+    """
+    calls = 0
+
+    async def model_fn(messages, info):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="ask_questions",
+                        args=SINGLE_QUESTION_BATCH.model_dump(),
+                    )
+                ]
+            )
+        await asyncio.sleep(0.2)
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="finish_interview", args={"summary": "ok"})]
+        )
+
+    return model_fn, lambda: calls
+
+
+async def test_repeated_answer_does_not_answer_the_last_question_twice(monkeypatch):
+    """Key auto-repeat must not record the same answer twice.
+
+    Once the last question of a round is answered, `index` has passed the end of
+    `pending` but the answered card is still mounted. A repeated Ctrl+N used to
+    collect that card again: the answer landed in the transcript twice and the
+    follow-up round was started twice.
+    """
+    model_fn, call_count = _one_question_model()
+
+    async def fake_stream(model, seed, answers, custom_instructions=""):
+        yield FINAL
+
+    monkeypatch.setattr(app_mod, "stream_rewrite", fake_stream)
+
+    app = SpecfillApp(
+        prefill="Seed.", settings=TEST_SETTINGS, model=FunctionModel(model_fn)
+    )
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("ctrl+s")
+        await _wait_for(pilot, lambda: bool(app.screen.query(QuestionCard)))
+        screen = app.screen
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("ctrl+n", "ctrl+n")
+        await pilot.pause()
+
+        assert len(screen.round_answers) == 1, "answer recorded twice"
+
+        await _wait_for(pilot, lambda: isinstance(app.screen, ResultScreen))
+        await pilot.press("q")
+
+    assert [a.question.header for a in screen.session.transcript] == ["Auth"]
+    assert call_count() == 2, "the round must be submitted exactly once"
+
+
+async def test_repeated_skip_does_not_crash_on_the_last_question(monkeypatch):
+    """A repeated Ctrl+K used to raise IndexError from `pending[index]`."""
+    model_fn, call_count = _one_question_model()
+
+    async def fake_stream(model, seed, answers, custom_instructions=""):
+        yield FINAL
+
+    monkeypatch.setattr(app_mod, "stream_rewrite", fake_stream)
+
+    app = SpecfillApp(
+        prefill="Seed.", settings=TEST_SETTINGS, model=FunctionModel(model_fn)
+    )
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("ctrl+s")
+        await _wait_for(pilot, lambda: bool(app.screen.query(QuestionCard)))
+        screen = app.screen
+        await pilot.press("ctrl+k", "ctrl+k")
+        await pilot.pause()
+
+        assert len(screen.round_answers) == 1, "skip recorded twice"
+
+        await _wait_for(pilot, lambda: isinstance(app.screen, ResultScreen))
+        await pilot.press("q")
+
+    assert [a.skipped for a in screen.session.transcript] == [True]
+    assert call_count() == 2, "the round must be submitted exactly once"
+
+
 async def test_skip_and_finish_now(monkeypatch):
     def model_fn(messages, info):
         return ModelResponse(

@@ -329,7 +329,9 @@ class InterviewSession:
     async def submit_answers(
         self, round_answers: list[Answer]
     ) -> QuestionBatch | InterviewComplete:
-        if self.rounds_completed + 1 >= MAX_ROUNDS:
+        # MAX_ROUNDS is a cap on rounds of questions, so the model may still ask
+        # round MAX_ROUNDS; only the round after it is refused.
+        if self.rounds_completed >= MAX_ROUNDS:
             self.transcript.extend(round_answers)
             self.rounds_completed += 1
             return InterviewComplete(summary="Round cap reached.")

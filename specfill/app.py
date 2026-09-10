@@ -420,11 +420,25 @@ class InterviewScreen(Screen):
         except NoMatches:
             return None
 
+    def _awaiting_answer(self) -> bool:
+        """Whether the question at `index` still needs an answer.
+
+        Answering the last question of a round leaves `index` at the end of
+        `pending` while the round's request is in flight, and the answered card
+        stays mounted until the next round replaces it. Key auto-repeat or a
+        double click therefore delivers another answer for a question that is
+        already submitted.
+        """
+        return self.index < len(self.pending)
+
     async def _advance(self) -> None:
         self.index += 1
         if self.index < len(self.pending):
             await self._show_card()
         else:
+            # The round is on its way: drop the card so it cannot be answered
+            # again, and so the UI does not keep showing a settled question.
+            await self.query_one("#card_slot").remove_children()
             self.next_round()
 
     def _to_result(self, answers: list[Answer]) -> None:
@@ -480,7 +494,7 @@ class InterviewScreen(Screen):
 
     async def action_answer(self) -> None:
         card = self._current_card()
-        if card is None:
+        if card is None or not self._awaiting_answer():
             return
         answer = card.collect()
         if answer is None:
@@ -490,7 +504,7 @@ class InterviewScreen(Screen):
         await self._advance()
 
     async def action_skip(self) -> None:
-        if self._current_card() is None:
+        if self._current_card() is None or not self._awaiting_answer():
             return
         self.round_answers.append(Answer(question=self.pending[self.index], skipped=True))
         await self._advance()
