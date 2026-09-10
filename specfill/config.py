@@ -219,7 +219,12 @@ def store_api_key(settings: Settings, key: str) -> Settings:
 
 
 def get_api_key(settings: Settings) -> str:
-    """Resolve the provider's API key or Codex OAuth bearer token."""
+    """Resolve the provider's API key or Codex OAuth bearer token.
+
+    Resolution must not depend on how `settings` was built: the wizard asks
+    about a candidate from `default_settings()`, which deliberately ignores the
+    environment, so `$SPECFILL_API_KEY` has to be consulted here as well.
+    """
     if settings.preset.uses_codex_oauth:
         auth = get_codex_auth()
         return auth.access_token if auth else ""
@@ -235,6 +240,9 @@ def get_api_key(settings: Settings) -> str:
             pass
     if settings.api_key:
         return settings.api_key
+    env_key = os.environ.get("SPECFILL_API_KEY")
+    if env_key:
+        return env_key
     return os.environ.get(settings.preset.env_var, "") if settings.preset.env_var else ""
 
 

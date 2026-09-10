@@ -203,7 +203,15 @@ class WizardScreen(Screen):
         key_input.placeholder = self._key_placeholder()
         key_input.disabled = PROVIDERS[self._provider].uses_codex_oauth
         self.query_one("#api_key_label", Label).update(self._key_label())
-        self.query_one("#base_url", Input).placeholder = self._base_url_placeholder()
+        # A base URL belongs to the provider it was typed for. Carrying it over
+        # would silently point the new provider at the previous one's endpoint,
+        # so restore the configured provider's own URL or start empty.
+        current = self.app.settings if isinstance(self.app, SpecfillApp) else None
+        base_url_input = self.query_one("#base_url", Input)
+        base_url_input.value = (
+            current.base_url if current is not None and current.provider == self._provider else ""
+        )
+        base_url_input.placeholder = self._base_url_placeholder()
 
     @on(Button.Pressed, "#save")
     def _on_save(self) -> None:
@@ -717,7 +725,10 @@ def _config_set(settings: Settings, key: str, value: str) -> int:
         if not settings.model or settings.model == settings.preset.default_model:
             update["model"] = PROVIDERS[value].default_model
         if value != settings.provider:
-            update.update(api_key_storage="keyring", api_key="")
+            # The stored key and base URL belong to the provider being left
+            # behind; keeping the URL would send the new provider's requests to
+            # the old provider's endpoint.
+            update.update(api_key_storage="keyring", api_key="", base_url="")
         settings = settings.model_copy(update=update)
     elif key == "model":
         settings = settings.model_copy(update={"model": value})

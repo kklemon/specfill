@@ -19,6 +19,7 @@ from specfill.app import (
 )
 from specfill.config import (
     codex_auth_path,
+    config_path,
     default_settings,
     get_api_key,
     load_settings,
@@ -271,3 +272,56 @@ async def test_first_launch_wizard_accepts_codex_oauth_without_api_key():
     saved = load_settings()
     assert saved is not None
     assert saved.provider == "openai-subscription"
+
+
+async def test_first_launch_wizard_accepts_specfill_api_key_from_environment(monkeypatch):
+    """SPECFILL_* is documented as an override, but the wizard ignored this one.
+
+    The wizard resolves a candidate built by `default_settings()`, which skips
+    the environment by design, so it refused to save with a valid key present.
+    """
+    monkeypatch.setenv("SPECFILL_API_KEY", "sk-from-env")
+
+    app = SpecfillApp(settings=None, model=None)
+    async with app.run_test(size=(100, 45)) as pilot:
+        await pilot.pause()
+        wizard = app.screen
+        assert isinstance(wizard, WizardScreen)
+        assert "stored" in wizard.query_one("#api_key").placeholder
+
+        await pilot.press("ctrl+s")
+        await _wait_for(pilot, lambda: isinstance(app.screen, PasteScreen))
+        assert app.settings is not None
+
+    saved = load_settings()
+    assert saved is not None
+    assert "sk-from-env" not in config_path().read_text(), "an env key must not be persisted"
+
+
+async def test_switching_provider_drops_the_previous_base_url(monkeypatch):
+    """A base URL typed for one provider used to follow the user to the next."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic")
+    configured = default_settings("openai-compatible").model_copy(
+        update={"model": "local-model", "base_url": "http://localhost:1234/v1"}
+    )
+
+    app = SpecfillApp(settings=configured, model=None)
+    async with app.run_test(size=(100, 45)) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+o")
+        await _wait_for(pilot, lambda: isinstance(app.screen, WizardScreen))
+        wizard = app.screen
+        assert wizard.query_one("#base_url").value == "http://localhost:1234/v1"
+
+        anthropic = app_mod.PROVIDER_ORDER.index("anthropic")
+        wizard.query("#provider RadioButton")[anthropic].value = True
+        await pilot.pause()
+        assert wizard.query_one("#base_url").value == "", "stale base URL carried over"
+
+        await pilot.press("ctrl+s")
+        await _wait_for(pilot, lambda: isinstance(app.screen, PasteScreen))
+
+    saved = load_settings()
+    assert saved is not None
+    assert saved.provider == "anthropic"
+    assert saved.base_url == ""

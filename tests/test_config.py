@@ -103,6 +103,18 @@ def test_get_api_key_env_fallback(monkeypatch):
     assert get_api_key(settings) == "sk-env"
 
 
+def test_get_api_key_specfill_var_applies_to_constructed_settings(monkeypatch):
+    """default_settings() skips the environment, so the wizard must still see it."""
+    monkeypatch.setenv("SPECFILL_API_KEY", "sk-generic")
+    assert get_api_key(default_settings("openai")) == "sk-generic"
+
+
+def test_get_api_key_prefers_specfill_var_over_provider_var(monkeypatch):
+    monkeypatch.setenv("SPECFILL_API_KEY", "sk-generic")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-provider")
+    assert get_api_key(default_settings("openai")) == "sk-generic"
+
+
 def test_codex_oauth_credentials_are_read_from_codex_home():
     path = codex_auth_path()
     path.parent.mkdir(parents=True)
