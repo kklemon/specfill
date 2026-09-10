@@ -1,5 +1,6 @@
 """Textual TUI: configure once, paste a seed prompt, get interviewed, receive the refined prompt."""
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -660,9 +661,7 @@ class SpecfillApp(App[str | None]):
             self.push_screen(PasteScreen(self.prefill))
 
 
-def _build_parser() -> "argparse.ArgumentParser":
-    import argparse
-
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="specfill",
         description="Interview yourself about the gaps in a project seed prompt.",
@@ -794,10 +793,15 @@ def main() -> None:
     prefill = ""
     if args.file:
         path = Path(args.file)
-        if not path.is_file():
-            print(f"specfill: file not found: {path}", file=sys.stderr)
-            raise SystemExit(1)
-        prefill = path.read_text()
+        # Reading directly reports a missing file, a directory, and a permission
+        # problem the same way, without a traceback or a check-then-read race.
+        try:
+            prefill = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(
+                f"specfill: cannot read {path}: {exc.strerror or exc}", file=sys.stderr
+            )
+            raise SystemExit(1) from exc
 
     try:
         result = SpecfillApp(prefill, settings=load_settings()).run()

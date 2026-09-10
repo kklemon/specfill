@@ -236,7 +236,3 @@ def get_api_key(settings: Settings) -> str:
     if settings.api_key:
         return settings.api_key
     return os.environ.get(settings.preset.env_var, "") if settings.preset.env_var else ""
-
-
-def has_api_key(settings: Settings) -> bool:
-    return bool(get_api_key(settings))
