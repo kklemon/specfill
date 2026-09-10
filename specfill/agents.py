@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Callable
 
 from pydantic_ai import Agent, ModelRetry, ToolOutput, WebSearchTool
 from pydantic_ai.capabilities import WebSearch
-from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.messages import NativeToolCallPart, PartEndEvent, PartStartEvent
 from pydantic_ai.models import Model
 from pydantic_ai.settings import ModelSettings
@@ -216,6 +216,21 @@ def _is_transient(exc: Exception) -> bool:
     return isinstance(exc, (ModelAPIError, ConnectionError, TimeoutError))
 
 
+def _may_be_search_failure(exc: Exception) -> bool:
+    """Whether a failed run can plausibly be blamed on the web search tool.
+
+    Used to decide if it is worth continuing the session without native search.
+    Only failures that a search-free retry could actually fix qualify: a client
+    error (bad key, bad request) or the model giving up on the output schema
+    would fail exactly the same way without search.
+    """
+    if isinstance(exc, UnexpectedModelBehavior):
+        return False
+    if isinstance(exc, ModelHTTPError) and 400 <= exc.status_code < 500:
+        return exc.status_code == 429  # a rate limit may be search-specific
+    return True
+
+
 async def _run_with_retries(coro_factory, attempts: int = 3):
     delay = 2.0
     for attempt in range(attempts):
@@ -303,20 +318,23 @@ class InterviewSession:
                     prompt, message_history=self._messages, event_stream_handler=handler
                 )
             )
-        except Exception:
-            if agent is not self._plain_agent:
-                # Native search is nominally supported but failed: warn, then
-                # continue the session without it.
-                self.search_enabled = False
-                if self.on_warning:
-                    self.on_warning("Web search failed — continuing without it.")
-                result = await _run_with_retries(
-                    lambda: self._plain_agent.run(
-                        prompt, message_history=self._messages, event_stream_handler=handler
-                    )
-                )
-            else:
+        except Exception as exc:
+            if agent is self._plain_agent or not _may_be_search_failure(exc):
+                # Re-running without search would repeat a failure that search
+                # cannot explain: an auth or bad-request error, or output
+                # validation giving up. Doing it anyway pays for the request
+                # twice and blames the search backend for the user's error.
                 raise
+            # Native search is nominally supported but the request failed:
+            # warn, then continue the session without it.
+            self.search_enabled = False
+            if self.on_warning:
+                self.on_warning("Web search failed — continuing without it.")
+            result = await _run_with_retries(
+                lambda: self._plain_agent.run(
+                    prompt, message_history=self._messages, event_stream_handler=handler
+                )
+            )
         self._messages = result.all_messages()
         return result.output
 

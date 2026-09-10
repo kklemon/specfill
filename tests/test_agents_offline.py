@@ -4,6 +4,7 @@ import json
 
 import pytest
 from pydantic_ai import models
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
@@ -192,6 +193,53 @@ async def test_search_failure_warns_and_falls_back():
     assert session.search_enabled is False
     assert warnings == ["Web search failed — continuing without it."]
     assert calls == 2
+
+
+async def test_auth_failure_is_not_reported_as_a_search_failure():
+    """A 401 is the user's to see: no fallback, no misleading warning, one request."""
+    calls = 0
+
+    def model_fn(messages, info):
+        nonlocal calls
+        calls += 1
+        raise ModelHTTPError(401, "gpt-x", "invalid api key")
+
+    warnings: list[str] = []
+    session = InterviewSession(
+        "x",
+        FunctionModel(model_fn),
+        web_search=True,
+        on_warning=warnings.append,
+    )
+    with pytest.raises(ModelHTTPError):
+        await session.start()
+
+    assert session.search_enabled is True, "search must stay on for the retry"
+    assert warnings == []
+    assert calls == 1, "the failing request must not be re-issued without search"
+
+
+async def test_validation_failure_is_not_reported_as_a_search_failure():
+    """Output validation giving up is not a search problem either."""
+    calls = 0
+
+    def model_fn(messages, info):
+        nonlocal calls
+        calls += 1
+        return ModelResponse(parts=[ToolCallPart(tool_name="nope", args={})])
+
+    warnings: list[str] = []
+    session = InterviewSession(
+        "x",
+        FunctionModel(model_fn),
+        web_search=True,
+        on_warning=warnings.append,
+    )
+    with pytest.raises(UnexpectedModelBehavior):
+        await session.start()
+
+    assert session.search_enabled is True
+    assert warnings == []
 
 
 async def test_custom_instructions_reach_the_model():
