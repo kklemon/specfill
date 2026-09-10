@@ -23,7 +23,7 @@ from specfill.config import (
     get_api_key,
     load_settings,
 )
-from specfill.models import Question, QuestionBatch, QuestionOption
+from specfill.models import Answer, Question, QuestionBatch, QuestionOption
 
 models.ALLOW_MODEL_REQUESTS = False
 
@@ -189,6 +189,106 @@ async def test_regenerate_uses_same_evidence(monkeypatch):
         await pilot.press("r")  # regenerate with the same evidence
         await _wait_for(pilot, lambda: len(stream_calls) == 2)
         assert stream_calls[0] == stream_calls[1] == answers
+        await pilot.press("q")
+
+
+def _answered_question() -> Answer:
+    return Answer(question=BATCH.questions[0], selected=["OAuth"])
+
+
+def _unused_model() -> FunctionModel:
+    """`stream_rewrite` is stubbed in these tests, so the model is never called."""
+    return FunctionModel(lambda messages, info: ModelResponse(parts=[]))
+
+
+async def test_quit_print_refuses_to_exit_with_nothing_to_print(monkeypatch):
+    """`p` used to exit with None, so stdout got nothing and the exit code was 0."""
+
+    async def empty_stream(model, seed, answers, custom_instructions=""):
+        return
+        yield
+
+    monkeypatch.setattr(app_mod, "stream_rewrite", empty_stream)
+
+    app = SpecfillApp(settings=TEST_SETTINGS, model=_unused_model())
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        app.push_screen(ResultScreen("Seed.", [_answered_question()]))
+        await _wait_for(
+            pilot,
+            lambda: any("empty" in n.message for n in app._notifications),
+        )
+
+        await pilot.press("p")
+        await pilot.pause()
+        assert any(
+            "Nothing to print" in n.message for n in app._notifications
+        ), "pressing p with no output must say so rather than exit silently"
+        assert isinstance(app.screen, ResultScreen), "must not quit with no output"
+        assert app.return_value is None
+
+        await pilot.press("q")
+
+    assert app.return_value is None
+
+
+async def test_quit_print_asks_before_printing_a_partial_prompt(monkeypatch):
+    """Printing mid-stream used to emit a truncated prompt with no warning."""
+
+    async def slow_stream(model, seed, answers, custom_instructions=""):
+        yield "# Refined"
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(app_mod, "stream_rewrite", slow_stream)
+
+    app = SpecfillApp(settings=TEST_SETTINGS, model=_unused_model())
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        app.push_screen(ResultScreen("Seed.", [_answered_question()]))
+        await _wait_for(pilot, lambda: app.screen.final_text == "# Refined")
+
+        await pilot.press("p")
+        await pilot.pause()
+        assert any(
+            "Still generating" in n.message for n in app._notifications
+        ), "a partial prompt must be confirmed, not printed silently"
+        assert isinstance(app.screen, ResultScreen), "must confirm before printing a partial"
+        assert app.return_value is None
+
+        await pilot.press("p")
+        await pilot.pause()
+
+    assert app.return_value == "# Refined"
+
+
+async def test_copy_reports_when_the_system_clipboard_is_unavailable(monkeypatch):
+    """The old code notified success even when every clipboard path failed."""
+    import pyperclip
+
+    def no_clipboard(text):
+        raise RuntimeError("no clipboard mechanism")
+
+    async def fake_stream(model, seed, answers, custom_instructions=""):
+        yield FINAL
+
+    monkeypatch.setattr(pyperclip, "copy", no_clipboard)
+    monkeypatch.setattr(app_mod, "stream_rewrite", fake_stream)
+
+    app = SpecfillApp(settings=TEST_SETTINGS, model=_unused_model())
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        screen = ResultScreen("Seed.", [_answered_question()])
+        app.push_screen(screen)
+        await _wait_for(pilot, lambda: screen.final_text == FINAL)
+
+        screen.action_copy()
+        await pilot.pause()
+
+        assert app._notifications, "the user must be told something"
+        last = list(app._notifications)[-1]
+        assert last.severity == "warning", f"claimed success: {last.message!r}"
+        assert app._clipboard == FINAL, "the terminal fallback was not used"
+
         await pilot.press("q")
 
 

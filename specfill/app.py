@@ -521,6 +521,8 @@ class ResultScreen(Screen):
         self.answers = answers
         self.custom_instructions = custom_instructions
         self.final_text = ""
+        self._generating = False
+        self._partial_confirmed = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -562,6 +564,8 @@ class ResultScreen(Screen):
         await md.update("")
         stream = Markdown.get_stream(md)
         text = ""
+        self._generating = True
+        self._partial_confirmed = False
         try:
             async for fragment in stream_rewrite(
                 app.model_instance, self.seed, self.answers, self.custom_instructions
@@ -575,12 +579,26 @@ class ResultScreen(Screen):
             status.update(Text(f"Rewrite failed: {exc} — press r to regenerate."))
             self.notify("Rewrite failed.", severity="error")
             return
+        else:
+            # Report the outcome before the stream is torn down. stop() cancels
+            # its own task and re-raises that cancellation, even when nothing was
+            # ever written, and that must not cost the user the result: the
+            # screen would otherwise sit on "Generating refined prompt…" forever.
+            if not self.final_text:
+                # An empty result is a failure, not a 0-character success:
+                # printing it would emit an empty prompt and exit 0.
+                status.update(
+                    Text("The rewrite came back empty — press r to regenerate.")
+                )
+                self.notify("The model returned an empty prompt.", severity="error")
+            else:
+                status.update(
+                    f"Done — {len(self.final_text):,} characters."
+                    "  c: copy · r: regenerate · p: quit & print to stdout"
+                )
         finally:
+            self._generating = False
             await stream.stop()
-        status.update(
-            f"Done — {len(self.final_text):,} characters."
-            "  c: copy · r: regenerate · p: quit & print to stdout"
-        )
 
     @on(Button.Pressed, "#copy")
     def _on_copy(self) -> None:
@@ -602,13 +620,22 @@ class ResultScreen(Screen):
         if not self.final_text:
             self.notify("Nothing to copy yet.", severity="warning")
             return
-        self.app.copy_to_clipboard(self.final_text)
         try:
             import pyperclip
 
             pyperclip.copy(self.final_text)
         except Exception:
-            pass
+            # No system clipboard here (no pbcopy/xclip/wl-copy, or no display).
+            # Textual can still ask the terminal, which most support but macOS
+            # Terminal does not, so say what actually happened instead of
+            # claiming success.
+            self.app.copy_to_clipboard(self.final_text)
+            self.notify(
+                "Copied via the terminal — if pasting does not work, press p to"
+                " print the prompt instead.",
+                severity="warning",
+            )
+            return
         self.notify(
             f"Copied {len(self.final_text):,} characters to the clipboard."
         )
@@ -621,7 +648,22 @@ class ResultScreen(Screen):
         self.generate()
 
     def action_quit_print(self) -> None:
-        self.app.exit(self.final_text or None)
+        if not self.final_text:
+            # Exiting here would print nothing and still report success.
+            self.notify(
+                "Nothing to print yet — press r to regenerate, or q to quit.",
+                severity="error",
+            )
+            return
+        if self._generating and not self._partial_confirmed:
+            # A premature `p` would silently print a truncated prompt.
+            self._partial_confirmed = True
+            self.notify(
+                "Still generating — press p again to print the partial prompt.",
+                severity="warning",
+            )
+            return
+        self.app.exit(self.final_text)
 
     def action_quit_app(self) -> None:
         self.app.exit(None)
