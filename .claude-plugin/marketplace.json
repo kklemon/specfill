@@ -1,0 +1,18 @@
+{
+  "name": "specfill",
+  "owner": {
+    "name": "Kristian Klemon",
+    "email": "kristian.klemon@softmax-ai.com"
+  },
+  "metadata": {
+    "description": "specfill: fill the gaps in project specification prompts before a coding agent builds from them."
+  },
+  "plugins": [
+    {
+      "name": "specfill",
+      "source": "./",
+      "description": "Interviews you about the gaps in a project specification prompt, then weaves your answers back into it without rewriting your words.",
+      "category": "productivity"
+    }
+  ]
+}

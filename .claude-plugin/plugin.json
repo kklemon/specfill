@@ -1,0 +1,13 @@
+{
+  "name": "specfill",
+  "version": "0.1.4",
+  "description": "Interviews you about the gaps in a project specification prompt, then weaves your answers back into it without rewriting your words.",
+  "author": {
+    "name": "Kristian Klemon",
+    "email": "kristian.klemon@softmax-ai.com"
+  },
+  "homepage": "https://github.com/kklemon/specfill",
+  "repository": "https://github.com/kklemon/specfill",
+  "license": "MIT",
+  "keywords": ["specification", "prompt-engineering", "requirements", "interview", "coding-agents"]
+}
