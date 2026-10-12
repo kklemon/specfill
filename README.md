@@ -1,6 +1,7 @@
 # specfill
 
-An interactive TUI that fills the gaps in your project specification prompts.
+Fills the gaps in your project specification prompts: as an interactive TUI,
+or as a skill inside Claude Code, Codex, and other coding agents.
 
 <img src="docs/assets/specfill-demo.gif" alt="specfill demo showing prompt analysis, interview questions, and the refined prompt" width="720">
 
@@ -45,6 +46,9 @@ OpenAI subscription option reuses a Codex login from `~/.codex/auth.json`; run
 `codex login` first. Other API keys are stored in the system keyring. If no
 keyring backend is available, they fall back to the config file (chmod 600).
 
+Prefer to stay inside your coding agent? Install the
+[agent skill](#agent-skill) instead; it needs no configuration.
+
 ## Usage
 
 ```sh
@@ -69,11 +73,72 @@ Flow:
 Skipped questions are treated as "implementer's discretion" and are never
 asked again.
 
+## Agent skill
+
+specfill also ships as an [Agent Skill](https://agentskills.io) for Claude
+Code, Codex, and other coding agents. The skill runs the same interview inside
+the agent you already use, with that agent's model, web search, and
+multiple-choice question UI, so it needs no API key or configuration. It also
+reads the codebase your prompt refers to instead of asking you about it.
+
+Install it in **Claude Code**:
+
+```
+/plugin marketplace add kklemon/specfill
+/plugin install specfill@specfill
+```
+
+On Claude Code 2.1.275 or later,
+`/plugin install specfill --marketplace kklemon/specfill` does both in one step.
+
+In **Codex**:
+
+```sh
+codex plugin marketplace add kklemon/specfill
+codex plugin add specfill@specfill
+```
+
+In **Cursor, Gemini CLI, GitHub Copilot, OpenCode**, and
+[many other agents](https://github.com/vercel-labs/skills), use the skills CLI,
+which also covers Claude Code and Codex:
+
+```sh
+npx skills add kklemon/specfill
+```
+
+Then point it at your prompt:
+
+```
+/specfill my-prompt.md                   # Claude Code (full name: /specfill:specfill)
+$specfill my-prompt.md                   # Codex
+use specfill to refine my-prompt.md      # any agent
+```
+
+Anything you add after the file, such as "challenge me on UI/UX decisions",
+acts as custom instructions. Agents also pick the skill on their own when you
+ask them to refine or complete a project prompt.
+
+How the skill differs from the TUI:
+
+- Questions use the agent's own question UI where it has one, such as Claude
+  Code's. Codex offers its question UI only in Plan mode, so in Default mode,
+  and in agents without one, the questions arrive as a plain message that you
+  answer in text, for example `1b, 2a+c, 3: free text, 4 skip`.
+- Answer `skip` to leave a question open, or `finish` to end the interview and
+  get the refined prompt.
+- A prompt read from a file is revised in place with targeted edits, so you
+  can review the diff. A pasted prompt comes back as the agent's reply; in
+  Claude Code, `/copy` puts it on the clipboard.
+- The interviewer and rewriter follow the same rules as the TUI, but the
+  model, reasoning effort, and web search are the agent's. The TUI's
+  configuration below does not apply.
+
 ## Configuration
 
-Settings live in `~/.config/specfill/config.toml` (honors `$XDG_CONFIG_HOME`).
-They can be edited in three ways: the in-app settings screen (`Ctrl+O` on the
-paste screen), the CLI, or the file itself.
+These settings apply to the TUI. They live in
+`~/.config/specfill/config.toml` (honors `$XDG_CONFIG_HOME`) and can be edited
+in three ways: the in-app settings screen (`Ctrl+O` on the paste screen), the
+CLI, or the file itself.
 
 ```sh
 specfill config show                    # current configuration
@@ -113,5 +178,10 @@ LLM inference is provider-agnostic via [Pydantic AI](https://ai.pydantic.dev/)
 
 ```sh
 uv sync
-uv run pytest    # offline tests (scripted models, no network)
+uv run pytest                       # offline tests (scripted models, no network)
+claude plugin validate --strict .   # plugin, marketplace, and skill manifests
 ```
+
+The skill lives in `skills/specfill/SKILL.md` and mirrors the TUI's prompts in
+`specfill/agents.py`; the tests fail when the rewriter rules or the round cap
+drift apart. See [docs/publishing.md](docs/publishing.md) for releasing both.
