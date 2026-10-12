@@ -1,0 +1,4 @@
+interface:
+  display_name: "specfill"
+  short_description: "Interview me about the gaps in a project spec prompt"
+  default_prompt: "Use $specfill to find the gaps in my project prompt and interview me about them."
